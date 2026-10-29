@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>即時同步手寫畫布</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #f0f0f0;
+            font-family: sans-serif;
+        }
+        #status {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            padding: 5px 10px;
+            background: rgba(0,0,0,0.7);
+            color: white;
+            border-radius: 4px;
+            font-size: 14px;
+            pointer-events: none;
+        }
+        #toolbar {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: white;
+            padding: 8px;
+            border-radius: 6px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        button {
+            padding: 6px 12px;
+            cursor: pointer;
+        }
+        canvas {
+            display: block;
+            background: #ffffff;
+            cursor: crosshair;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="status">連線中...</div>
+    <div id="toolbar">
+        <button id="clearBtn">清除畫布</button>
+    </div>
+    <canvas id="paintCanvas"></canvas>
+
+    <script>
+        const canvas = document.getElementById('paintCanvas');
+        const ctx = canvas.getContext('2d');
+        const statusDiv = document.getElementById('status');
+        const clearBtn = document.getElementById('clearBtn');
+
+        // 自動調整畫布大小為視窗大小
+        function resizeCanvas() {
+            // 注意：為了讓不同解析度的裝置（iPad、電腦）畫面同步不歪斜，
+            // 這裡採用固定的邏輯畫布大小（例如 1920x1080），再縮放到螢幕上
+            canvas.width = 1920;
+            canvas.height = 1080;
+            canvas.style.width = window.innerWidth + 'px';
+            canvas.style.height = window.innerHeight + 'px';
+            
+            // 設定畫筆樣式
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+            ctx.lineWidth = 4;
+            ctx.strokeStyle = '#333333';
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        // 建立 WebSocket 連線（請將 localhost 改為您後端伺服器的 IP 地址）
+        const wsUrl = `ws://${window.location.hostname}:8080`;
+        const ws = new WebSocket(wsUrl);
+
+        ws.onopen = () => {
+            statusDiv.textContent = '已連線 (即時同步中)';
+            statusDiv.style.background = 'rgba(40, 167, 69, 0.8)';
+        };
+
+        ws.onclose = () => {
+            statusDiv.textContent = '連線已斷開';
+            statusDiv.style.background = 'rgba(220, 53, 69, 0.8)';
+        };
+
+        // 接收來自其他裝置的筆劃數據
+        ws.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            
+            if (data.type === 'draw') {
+                draw(data.x1, data.y1, data.x2, data.y2, false); // false 表示這是遠端畫的，不用再送出
+            } else if (data.type === 'clear') {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+            }
+        };
+
+        let isDrawing = false;
+        let lastX = 0;
+        let lastY = 0;
+
+        // 核心繪製函式
+        function draw(x1, y1, x2, y2, emit = true) {
+            ctx.beginPath();
+            ctx.moveTo(x1, y1);
+            ctx.lineTo(x2, y2);
+            ctx.stroke();
+
+            // 如果是本地繪製，則將座標透過 WebSocket 廣播出去
+            if (emit && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({
+                    type: 'draw',
+                    x1: x1,
+                    y1: y1,
+                    x2: x2,
+                    y2: y2
+                }));
+            }
+        }
+
+        // 轉換不同螢幕解析度下的座標，對齊到 1920x1080 的基準
+        function getCanvasCoords(e) {
+            const rect = canvas.getBoundingClientRect();
+            // 計算滑鼠/觸控在畫布上的相對比例，再乘上邏輯解析度
+            const x = ((e.clientX - rect.left) / rect.width) * canvas.width;
+            const y = ((e.clientY - rect.top) / rect.height) * canvas.height;
+            return { x, y };
+        }
+
+        // 使用 Pointer Events，一次搞定滑鼠、手指、Apple Pencil
+        canvas.addEventListener('pointerdown', (e) => {
+            isDrawing = true;
+            const coords = getCanvasCoords(e);
+            lastX = coords.x;
+            lastY = coords.y;
+            // 點擊當下畫一個點
+            draw(lastX, lastY, lastX, lastY, true);
+        });
+
+        canvas.addEventListener('pointermove', (e) => {
+            if (!isDrawing) return;
+            const coords = getCanvasCoords(e);
+            draw(lastX, lastY, coords.x, coords.y, true);
+            lastX = coords.x;
+            lastY = coords.y;
+        });
+
+        canvas.addEventListener('pointerup', () => isDrawing = false);
+        canvas.addEventListener('pointerleave', () => isDrawing = false);
+
+        // 清除畫布按鈕
+        clearBtn.addEventListener('click', () => {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            if (ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'clear' }));
+            }
+        });
+    </script>
+</body>
+</html>
