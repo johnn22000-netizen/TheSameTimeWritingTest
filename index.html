@@ -75,9 +75,17 @@
         window.addEventListener('resize', resizeCanvas);
         resizeCanvas();
 
-        // 建立 WebSocket 連線（請將 localhost 改為您後端伺服器的 IP 地址）
-        const wsUrl = `ws://${window.location.hostname}:8080`;
+        // 修改後的程式碼：自動判斷是在本機測試，還是從 GitHub 載入
+        let wsUrl;
+        if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+            // 在本機電腦測試時連線
+            wsUrl = `ws://localhost:8080`;
+        } else {
+            // 當用 iPad 或其他裝置開啟 GitHub Pages 時，強制連到您新電腦的固定 IP
+            wsUrl = `ws://192.168.20.208:8080`; 
+        }
         const ws = new WebSocket(wsUrl);
+
 
         ws.onopen = () => {
             statusDiv.textContent = '已連線 (即時同步中)';
